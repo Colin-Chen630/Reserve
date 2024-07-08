@@ -66,13 +66,21 @@ func CallReserve(csrf string, reserveId int, ticketNo string) (*DoResponse, erro
 	body := "csrf=" + csrf +
 		"&inter_reserve_id=" + strconv.Itoa(reserveId) +
 		"&ticket_no=" + ticketNo
-	_, err := Client.R().
+	resp, err := Client.R().
 		SetHeader("cookie", Cookie).
 		SetHeader("content-type", "application/x-www-form-urlencoded").
 		SetHeader("referer", "https://www.bilibili.com/blackboard/bw/2024/bws_event.html?navhide=1&stahide=1&native.theme=2&night=1#/Order/FieldOrder").
 		SetSuccessResult(&result).
 		SetBody(body).Post(DoUrl)
 	if err != nil {
+		if resp != nil && resp.StatusCode == 429 {
+			logger.Error("429 - 请求频率过高", zap.Error(err))
+			return nil, err
+		}
+		if resp != nil && resp.StatusCode == 412 {
+			logger.Error("412 - STATUS CODE", zap.Error(err))
+			return nil, err
+		}
 		logger.Error("获取Do接口错误", zap.Error(err))
 		return nil, err
 	}
@@ -140,6 +148,7 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 			case 412:
 			case 429:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 412 / 429 重试中", zap.String("message", reservation.Message))
+				time.Sleep(300 * time.Millisecond)
 				continue
 			case 76650:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 操作频繁，等待重试。", zap.String("message", reservation.Message))
