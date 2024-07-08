@@ -9,8 +9,10 @@ import (
 )
 
 type Configuration struct {
-	Job    map[string]string `json:"job"`
-	Cookie string            `json:"cookie"`
+	Job          map[string]string `json:"job"`
+	Cookie       string            `json:"cookie"`
+	RefreshToken string            `json:"refresh_token"`
+	BuvID        string            `json:"buv_id"`
 }
 
 func convertJobKeyType(job map[string]string) map[int]string {
