@@ -25,7 +25,7 @@ var logger *zap.Logger
 var nameMap map[int]string
 var currentTimeOffset time.Duration
 var TicketData = map[string]InfoTicketInfo{}
-var ch = make(chan int)
+var ch = make(chan *req.Response)
 
 // TargetPair Reserve ID: ticket ID
 var TargetPair = map[int]string{}
@@ -61,6 +61,25 @@ func GetUserTicketInfo(info *InfoData) {
 	}
 }
 
+func writeAllResponseToFile() {
+	//init a writer
+	f, err := os.Create("response.txt")
+	if err != nil {
+		logger.Error("读写文件错误", zap.Error(err))
+	}
+	defer f.Close()
+	for {
+		select {
+		case r := <-ch:
+			_, err := f.WriteString(r.String() + "\n")
+			if err != nil {
+				logger.Error("写文件错误", zap.Error(err))
+			}
+		}
+	}
+
+}
+
 func CallReserve(csrf string, reserveId int, ticketNo string) (*DoResponse, error) {
 	var result DoResponse
 	body := "csrf=" + csrf +
@@ -72,6 +91,7 @@ func CallReserve(csrf string, reserveId int, ticketNo string) (*DoResponse, erro
 		SetHeader("referer", "https://www.bilibili.com/blackboard/bw/2024/bws_event.html?navhide=1&stahide=1&native.theme=2&night=1#/Order/FieldOrder").
 		SetSuccessResult(&result).
 		SetBody(body).Post(DoUrl)
+	ch <- resp
 	if err != nil {
 		if resp != nil && resp.StatusCode == 429 {
 			logger.Error("429 - 请求频率过高", zap.Error(err))
@@ -249,6 +269,7 @@ func main() {
 		logger.Error("获取预约信息失败", zap.Error(err))
 		return
 	}
+	go writeAllResponseToFile()
 	// 获取用户可用票
 	GetUserTicketInfo(&info.Data)
 	createReservationIDandNameMap(info.Data)
@@ -265,6 +286,7 @@ func main() {
 	//print resp code and message
 	//logger.Info("预约结果", zap.Int("code", resp.Code), zap.String("message", resp.Message))
 	// 预约
+
 	for reserveId, ticketNo := range TargetPair {
 		wg.Add(1)
 		createReservationJob(reserveId, ticketNo, csrfToken, info.Data, &wg)
