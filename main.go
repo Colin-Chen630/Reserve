@@ -255,8 +255,14 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 				return
 			case 75637:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 项目可能未开始！紧急重试！", zap.String("message", reservation.Message))
+				if Proxy != "" {
+					lock.Unlock()
+					client = client.SetProxyURL(Proxy)
+					continue
+				}
+				time.Sleep(500 * time.Millisecond)
 				lock.Unlock()
-				return
+				continue
 			default:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 警告：未知返回代码！防止风控，立即结束当前任务！", zap.String("message", reservation.Message), zap.Any("code", reservation.Code))
 				lock.Unlock()
