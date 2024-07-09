@@ -2,14 +2,15 @@ package main
 
 import (
 	"errors"
-	"github.com/imroc/req/v3"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/imroc/req/v3"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var Cookie string
@@ -167,24 +168,23 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 			switch reservation.Code {
 			case 412:
 			case 429:
-				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 412 / 429 重试中", zap.String("message", reservation.Message))
-				time.Sleep(300 * time.Millisecond)
+				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 412 / 429 重试中, 账号/IP 可能被限制。", zap.String("message", reservation.Message))
+				time.Sleep(600 * time.Millisecond)
 				continue
 			case 76650:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 操作频繁，等待重试。", zap.String("message", reservation.Message))
-				time.Sleep(300 * time.Millisecond)
+				time.Sleep(600 * time.Millisecond)
 				continue
 			case 76647:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 该账户预约次数达到上限，退出此任务。", zap.String("message", reservation.Message))
 				return
 			case -702:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 请求频率过高，等待重试。", zap.String("message", reservation.Message))
-				time.Sleep(500 * time.Millisecond)
+				time.Sleep(600 * time.Millisecond)
 				continue
 			case 75574:
-				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 本项目预约已满。准备回流。30秒检测一次。", zap.String("message", reservation.Message))
-				time.Sleep(30 * time.Second)
-				continue
+				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 本项目预约已满。结束任务。", zap.String("message", reservation.Message))
+				return
 			case 75637:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 项目可能未开始！紧急重试！", zap.String("message", reservation.Message))
 				return
@@ -192,6 +192,9 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 警告：未知返回代码！防止风控，立即结束当前任务！", zap.String("message", reservation.Message), zap.Any("code", reservation.Code))
 				return
 			}
+		}
+		if reservation.Message != "0" {
+			logger.Error(nameMap[reservedId] + " @ " + ticket.ScreenName + "莫名其妙的 0, 需要重试。")
 		}
 		logger.Info(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 预约成功", zap.String("message", reservation.Message))
 		return
