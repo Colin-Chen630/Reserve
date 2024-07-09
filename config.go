@@ -13,6 +13,7 @@ type Configuration struct {
 	Cookie       string            `json:"cookie"`
 	RefreshToken string            `json:"refresh_token"`
 	BuvID        string            `json:"buv_id"`
+	Proxy		 string 			`json:proxy`
 }
 
 func convertJobKeyType(job map[string]string) map[int]string {

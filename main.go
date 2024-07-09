@@ -21,7 +21,11 @@ var InfoUrl = "https://api.bilibili.com/x/activity/bws/online/park/reserve/info?
 
 const DoUrl = "https://api.bilibili.com/x/activity/bws/online/park/reserve/do"
 
-var Client = req.C().SetUserAgent(UA).SetTLSFingerprintIOS().ImpersonateSafari()
+// Proxy Working Policy:
+// 1. If you want to use proxy, set the proxy in config.json
+// 2. Policy only triggerd while received and "too many requests" error for one time.
+var Proxy string
+
 var logger *zap.Logger
 var nameMap map[int]string
 
@@ -43,8 +47,9 @@ func InitLogger() {
 }
 
 func GetReservationInfo() (*InfoResponse, error) {
+	var client = req.C().SetUserAgent(UA).SetTLSFingerprintIOS().ImpersonateSafari()
 	var result InfoResponse
-	_, err := Client.R().
+	_, err := client.R().
 		SetHeader("Cookie", Cookie).
 		SetSuccessResult(&result).Get(InfoUrl)
 	if err != nil {
@@ -85,12 +90,12 @@ func writeAllResponseToFile() {
 
 }
 
-func CallReserve(csrf string, reserveId int, ticketNo string) (*DoResponse, error) {
+func CallReserve(csrf string, reserveId int, ticketNo string, client *req.Client) (*DoResponse, error) {
 	var result = NewDoResponse()
 	body := "csrf=" + csrf +
 		"&inter_reserve_id=" + strconv.Itoa(reserveId) +
 		"&ticket_no=" + ticketNo
-	resp, err := Client.R().
+	resp, err := client.R().
 		SetHeader("cookie", Cookie).
 		SetHeader("content-type", "application/x-www-form-urlencoded").
 		SetHeader("referer", "https://www.bilibili.com/blackboard/bw/2024/bws_event.html?navhide=1&stahide=1&native.theme=2&night=1#/Order/FieldOrder").
@@ -184,6 +189,7 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 	//calculate the timer decay
 	realStartTime := startTime * 1000
 	ticket := TicketData[ticketId]
+	var client = req.C().SetUserAgent(UA).SetTLSFingerprintIOS().ImpersonateSafari()
 	for {
 		//get start time
 		currentTime := time.Now().Add(currentTimeOffset).UnixMilli()
@@ -197,7 +203,10 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 		}
 		//do reserve
 		lock.Lock()
-		reservation, err := CallReserve(csrfToken, reservedId, ticketId)
+		reservation, err := CallReserve(csrfToken, reservedId, ticketId, client)
+		if Proxy!= ""{
+			client = client.SetProxy(nil)
+		}
 		if err != nil {
 			logger.Error(nameMap[reservedId]+" @"+ticket.ScreenName+" - 预约失败，内部错误，重试中。", zap.Error(err))
 			lock.Unlock()
@@ -208,11 +217,21 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 			case 412:
 			case 429:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 412 / 429 重试中, 账号/IP 可能被限制。", zap.String("message", reservation.Message))
+				if Proxy != "" {
+					lock.Unlock()
+					client = client.SetProxyURL(Proxy)
+					continue
+				}
 				time.Sleep(500 * time.Millisecond)
-				lock.Unlock()
+
 				continue
 			case 76650:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 操作频繁，等待重试。", zap.String("message", reservation.Message))
+				if Proxy != "" {
+					lock.Unlock()
+					client = client.SetProxyURL(Proxy)
+					continue
+				}
 				time.Sleep(500 * time.Millisecond)
 				lock.Unlock()
 				continue
@@ -222,6 +241,11 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 				return
 			case -702:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 请求频率过高，等待重试。", zap.String("message", reservation.Message))
+				if Proxy != "" {
+					lock.Unlock()
+					client = client.SetProxyURL(Proxy)
+					continue
+				}
 				time.Sleep(500 * time.Millisecond)
 				lock.Unlock()
 				continue
@@ -301,6 +325,11 @@ func main() {
 	logger.Info("CSRF Token", zap.String("token", csrfToken))
 	//set buvid in ua
 	UA = strings.ReplaceAll(UA, "${BUVID}", config.BuvID)
+	//set proxy
+	if config.Proxy != "" {
+		Proxy = config.Proxy
+		logger.Info("代理设置被添加", zap.String("proxy", Proxy))
+	}
 	//set csrf token
 	InfoUrl = strings.ReplaceAll(InfoUrl, "${csrf}", csrfToken)
 
