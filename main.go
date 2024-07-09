@@ -159,10 +159,6 @@ func checkEagiblity(reserveId int, ticketNo string) bool {
 	show := ReservationMap[reserveId]
 	//check is vip
 	ticket := TicketData[ticketNo]
-	if show.IsVipTicket == 1 && !isVIPTicket(ticketNo) {
-		logger.Error(nameMap[reserveId] + " @ " + ticket.ScreenName + " - 该票为VIP限定，不符合要求。")
-		return false
-	}
 	//下次预约是否为VIP票限定
 	if show.NextReserve.IsVipTicket == 1 && !isVIPTicket(ticketNo) {
 		logger.Error(nameMap[reserveId] + " @ " + ticket.ScreenName + " - 下次预约要求为VIP限定，不符合要求。")
