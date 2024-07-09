@@ -190,6 +190,7 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 	realStartTime := startTime * 1000
 	ticket := TicketData[ticketId]
 	var client = req.C().SetUserAgent(UA).SetTLSFingerprintIOS().ImpersonateSafari()
+	usingProxy := false
 	for {
 		//get start time
 		currentTime := time.Now().Add(currentTimeOffset).UnixMilli()
@@ -204,7 +205,7 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 		//do reserve
 		lock.Lock()
 		reservation, err := CallReserve(csrfToken, reservedId, ticketId, client)
-		if Proxy!= ""{
+		if usingProxy {
 			client = client.SetProxy(nil)
 		}
 		if err != nil {
@@ -217,22 +218,28 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 			case 412:
 			case 429:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 412 / 429 重试中, 账号/IP 可能被限制。", zap.String("message", reservation.Message))
-				if Proxy != "" {
+				if Proxy != "" && !usingProxy {
 					lock.Unlock()
 					client = client.SetProxyURL(Proxy)
+					logger.Info(nameMap[reservedId] + " @ " + ticket.ScreenName + " - 已经切换代理模式。")
+					usingProxy = true
 					continue
 				}
+				usingProxy = false
 				time.Sleep(500 * time.Millisecond)
 				lock.Unlock()
 				continue
 			case 76650:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 操作频繁，等待重试。", zap.String("message", reservation.Message))
-				if Proxy != "" {
+				if Proxy != "" && !usingProxy {
 					lock.Unlock()
 					client = client.SetProxyURL(Proxy)
+					logger.Info(nameMap[reservedId] + " @ " + ticket.ScreenName + " - 已经切换代理模式。")
+					usingProxy = true
 					continue
 				}
 				time.Sleep(500 * time.Millisecond)
+				usingProxy = false
 				lock.Unlock()
 				continue
 			case 76647:
@@ -241,12 +248,15 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 				return
 			case -702:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 请求频率过高，等待重试。", zap.String("message", reservation.Message))
-				if Proxy != "" {
+				if Proxy != "" && !usingProxy {
 					lock.Unlock()
 					client = client.SetProxyURL(Proxy)
+					logger.Info(nameMap[reservedId] + " @ " + ticket.ScreenName + " - 已经切换代理模式。")
+					usingProxy = true
 					continue
 				}
 				time.Sleep(500 * time.Millisecond)
+				usingProxy = false
 				lock.Unlock()
 				continue
 			case 75574:
@@ -255,12 +265,15 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 				return
 			case 75637:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 项目可能未开始！紧急重试！", zap.String("message", reservation.Message))
-				if Proxy != "" {
+				if Proxy != "" && !usingProxy {
 					lock.Unlock()
+					logger.Info(nameMap[reservedId] + " @ " + ticket.ScreenName + " - 已经切换代理模式。")
 					client = client.SetProxyURL(Proxy)
+					usingProxy = true
 					continue
 				}
 				time.Sleep(500 * time.Millisecond)
+				usingProxy = false
 				lock.Unlock()
 				continue
 			default:
