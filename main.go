@@ -24,9 +24,13 @@ const DoUrl = "https://api.bilibili.com/x/activity/bws/online/park/reserve/do"
 var Client = req.C().SetUserAgent(UA).SetTLSFingerprintIOS().ImpersonateSafari()
 var logger *zap.Logger
 var nameMap map[int]string
+
+var ReservationMap map[int]*InfoReserveDetail
+
 var currentTimeOffset time.Duration
 var TicketData = map[string]InfoTicketInfo{}
 var ch = make(chan *req.Response)
+var lock sync.Mutex
 
 // TargetPair Reserve ID: ticket ID
 var TargetPair = map[int]string{}
@@ -82,7 +86,7 @@ func writeAllResponseToFile() {
 }
 
 func CallReserve(csrf string, reserveId int, ticketNo string) (*DoResponse, error) {
-	var result DoResponse
+	var result = NewDoResponse()
 	body := "csrf=" + csrf +
 		"&inter_reserve_id=" + strconv.Itoa(reserveId) +
 		"&ticket_no=" + ticketNo
@@ -106,7 +110,7 @@ func CallReserve(csrf string, reserveId int, ticketNo string) (*DoResponse, erro
 		return nil, err
 	}
 
-	return &result, nil
+	return result, nil
 }
 
 func GetCSRFFromCookie(cookie string) string {
@@ -132,12 +136,45 @@ func getReservationStartDate(info InfoData, reserveId int) (int64, error) {
 	return -1, errors.New("未找到预约信息")
 }
 
+func isVIPTicket(ticketNo string) bool {
+	ticket := TicketData[ticketNo]
+	return strings.Contains(ticket.SkuName, "VIP")
+
+}
+
+func mapAllReserveInfo(info *InfoData) {
+	for _, value := range info.ReserveList {
+		for _, v := range value {
+			ReservationMap[v.ReserveID] = &v
+		}
+	}
+}
+
+func checkEagiblity(reserveId int, ticketNo string) bool {
+	show := ReservationMap[reserveId]
+	//check is vip
+	ticket := TicketData[ticketNo]
+	if show.IsVipTicket == 1 && !isVIPTicket(ticketNo) {
+		logger.Error(nameMap[reserveId] + " @ " + ticket.ScreenName + " - 该票为VIP限定，不符合要求。")
+		return false
+	}
+	//下次预约是否为VIP票限定
+	if show.NextReserve.IsVipTicket == 1 && !isVIPTicket(ticketNo) {
+		logger.Error(nameMap[reserveId] + " @ " + ticket.ScreenName + " - 下次预约要求为VIP限定，不符合要求。")
+		return false
+	}
+	return true
+}
+
 func createReservationJob(reserveId int, ticketNo string, csrfToken string, info InfoData, wg *sync.WaitGroup) {
 	reservationStartDate, err := getReservationStartDate(info, reserveId)
 	if err != nil {
 		logger.Error("无法获取预约开始时间", zap.Error(err))
 	}
-
+	if !checkEagiblity(reserveId, ticketNo) {
+		logger.Error("不符合要求，退出任务。")
+		return
+	}
 	go doReserve(reservationStartDate, reserveId, ticketNo, csrfToken, wg)
 
 }
@@ -159,9 +196,11 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 			continue
 		}
 		//do reserve
+		lock.Lock()
 		reservation, err := CallReserve(csrfToken, reservedId, ticketId)
 		if err != nil {
 			logger.Error(nameMap[reservedId]+" @"+ticket.ScreenName+" - 预约失败，内部错误，重试中。", zap.Error(err))
+			lock.Unlock()
 			continue
 		}
 		if reservation.Code != 0 {
@@ -169,34 +208,46 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 			case 412:
 			case 429:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 412 / 429 重试中, 账号/IP 可能被限制。", zap.String("message", reservation.Message))
-				time.Sleep(600 * time.Millisecond)
+				time.Sleep(500 * time.Millisecond)
+				lock.Unlock()
 				continue
 			case 76650:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 操作频繁，等待重试。", zap.String("message", reservation.Message))
-				time.Sleep(600 * time.Millisecond)
+				time.Sleep(500 * time.Millisecond)
+				lock.Unlock()
 				continue
 			case 76647:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 该账户预约次数达到上限，退出此任务。", zap.String("message", reservation.Message))
+				lock.Unlock()
 				return
 			case -702:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 请求频率过高，等待重试。", zap.String("message", reservation.Message))
-				time.Sleep(600 * time.Millisecond)
+				time.Sleep(500 * time.Millisecond)
+				lock.Unlock()
 				continue
 			case 75574:
-				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 本项目预约已满。结束任务。", zap.String("message", reservation.Message))
+				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 本项目预约已满。不存在回流机制，结束任务。", zap.String("message", reservation.Message))
+				lock.Unlock()
 				return
 			case 75637:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 项目可能未开始！紧急重试！", zap.String("message", reservation.Message))
+				lock.Unlock()
 				return
 			default:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 警告：未知返回代码！防止风控，立即结束当前任务！", zap.String("message", reservation.Message), zap.Any("code", reservation.Code))
+				lock.Unlock()
 				return
 			}
 		}
-		if reservation.Message != "0" {
-			logger.Error(nameMap[reservedId] + " @ " + ticket.ScreenName + "莫名其妙的 0, 需要重试。")
+		if reservation.Message != "0" || reservation.Code == -999 {
+			logger.Error(nameMap[reservedId] + " @ " + ticket.ScreenName + "返回数据反序列化失败。重新请求。")
+			time.Sleep(500 * time.Millisecond)
+			lock.Unlock()
+			continue
 		}
-		logger.Info(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 预约成功", zap.String("message", reservation.Message))
+		logger.Info(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 预约成功,请检查右侧 message 是否是 0。", zap.String("message", reservation.Message))
+		time.Sleep(450 * time.Millisecond)
+		lock.Unlock()
 		return
 	}
 }
@@ -276,7 +327,7 @@ func main() {
 	// 获取用户可用票
 	GetUserTicketInfo(&info.Data)
 	createReservationIDandNameMap(info.Data)
-
+	mapAllReserveInfo(&info.Data)
 	var wg sync.WaitGroup
 	//set up time sync
 	syncTimeOffset()

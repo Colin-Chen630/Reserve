@@ -5,3 +5,9 @@ type DoResponse struct {
 	Message string `json:"message"`
 	Ttl     int    `json:"ttl"`
 }
+
+func NewDoResponse() *DoResponse {
+	return &DoResponse{
+		Code: -999,
+	}
+}
