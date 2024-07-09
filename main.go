@@ -134,7 +134,11 @@ func getReservationStartDate(info InfoData, reserveId int) (int64, error) {
 	for _, value := range info.ReserveList {
 		for _, v := range value {
 			if v.ReserveID == reserveId {
-				return v.NextReserve.ReserveBeginTime, nil
+				if v.NextReserve.ReserveBeginTime != 0 {
+					return v.NextReserve.ReserveBeginTime, nil
+				} else {
+					return v.ReserveBeginTime, nil
+				}
 			}
 		}
 	}
@@ -159,9 +163,15 @@ func checkEagiblity(reserveId int, ticketNo string) bool {
 	show := ReservationMap[reserveId]
 	//check is vip
 	ticket := TicketData[ticketNo]
+	if show.NextReserve.ReserveBeginTime > 0{
+		if show.NextReserve.IsVipTicket == 1 && !isVIPTicket(ticketNo) {
+			logger.Error(nameMap[reserveId] + " @ " + ticket.ScreenName + " - 下次预约要求为VIP限定，不符合要求。")
+			return false
+		}
+	}
 	//下次预约是否为VIP票限定
-	if show.NextReserve.IsVipTicket == 1 && !isVIPTicket(ticketNo) {
-		logger.Error(nameMap[reserveId] + " @ " + ticket.ScreenName + " - 下次预约要求为VIP限定，不符合要求。")
+	if show.IsVipTicket == 1 && !isVIPTicket(ticketNo) {
+		logger.Error(nameMap[reserveId] + " @ " + ticket.ScreenName + " - 预约要求为VIP限定，不符合要求。")
 		return false
 	}
 	return true
