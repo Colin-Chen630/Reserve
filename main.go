@@ -134,7 +134,7 @@ func getReservationStartDate(info InfoData, reserveId int) (int64, error) {
 	for _, value := range info.ReserveList {
 		for _, v := range value {
 			if v.ReserveID == reserveId {
-				return v.ReserveBeginTime, nil
+				return v.NextReserve.ReserveBeginTime, nil
 			}
 		}
 	}
