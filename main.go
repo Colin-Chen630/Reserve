@@ -223,7 +223,7 @@ func doReserve(startTime int64, reservedId int, ticketId string, csrfToken strin
 					continue
 				}
 				time.Sleep(500 * time.Millisecond)
-
+				lock.Unlock()
 				continue
 			case 76650:
 				logger.Error(nameMap[reservedId]+" @ "+ticket.ScreenName+" - 操作频繁，等待重试。", zap.String("message", reservation.Message))
