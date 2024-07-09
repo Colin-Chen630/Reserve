@@ -25,7 +25,7 @@ var Client = req.C().SetUserAgent(UA).SetTLSFingerprintIOS().ImpersonateSafari()
 var logger *zap.Logger
 var nameMap map[int]string
 
-var ReservationMap map[int]*InfoReserveDetail
+var ReservationMap = map[int]*InfoReserveDetail{}
 
 var currentTimeOffset time.Duration
 var TicketData = map[string]InfoTicketInfo{}
